@@ -83,9 +83,9 @@ class AnimeSearchRepository {
 
     private fun searchAniList(query: String, filters: SearchFilters): List<Anime> {
         val graphQl = """
-            query (\$search: String) {
+            query (${ '$' }search: String) {
               Page(page: 1, perPage: 20) {
-                media(search: \$search, type: ANIME, sort: SEARCH_MATCH) {
+                media(search: ${ '$' }search, type: ANIME, sort: SEARCH_MATCH) {
                   id
                   title { romaji english }
                   seasonYear
