@@ -10,11 +10,8 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
-    private val repository = AnimeSearchRepository()
-    private val executor = Executors.newSingleThreadExecutor()
     private lateinit var store: LocalStore
     private lateinit var adapter: AnimeAdapter
     private lateinit var input: AutoCompleteTextView
@@ -49,9 +46,14 @@ class MainActivity : AppCompatActivity() {
 
         setupSpinners()
         refreshHistoryAdapter()
-        searchButton.setOnClickListener { runSearch() }
+        progress.visibility = View.GONE
+        status.text = "Cari langsung ke beberapa sumber Sub Indo tanpa server metadata."
+
+        searchButton.setOnClickListener { runDirectSearch() }
         input.setOnEditorActionListener { _, actionId, _ ->
-            if (actionId == EditorInfo.IME_ACTION_SEARCH) { runSearch(); true } else false
+            if (actionId == EditorInfo.IME_ACTION_SEARCH) {
+                runDirectSearch(); true
+            } else false
         }
         bookmarksButton.setOnClickListener { showBookmarks() }
         clearHistory.setOnClickListener {
@@ -63,12 +65,10 @@ class MainActivity : AppCompatActivity() {
     private fun setupSpinners() {
         typeSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf("Semua tipe", "TV", "Movie", "OVA", "ONA", "Special"))
         statusSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf("Semua status", "Sedang tayang", "Selesai"))
-    }
-
-    private fun selectedFilters(): SearchFilters {
-        val type = when (typeSpinner.selectedItemPosition) { 1 -> "tv"; 2 -> "movie"; 3 -> "ova"; 4 -> "ona"; 5 -> "special"; else -> null }
-        val state = when (statusSpinner.selectedItemPosition) { 1 -> "airing"; 2 -> "complete"; else -> null }
-        return SearchFilters(type, state)
+        typeSpinner.isEnabled = false
+        statusSpinner.isEnabled = false
+        typeSpinner.alpha = 0.6f
+        statusSpinner.alpha = 0.6f
     }
 
     private fun refreshHistoryAdapter() {
@@ -76,43 +76,46 @@ class MainActivity : AppCompatActivity() {
         input.threshold = 0
     }
 
-    private fun runSearch() {
+    private fun runDirectSearch() {
         val query = input.text.toString().trim()
-        if (query.length < 2) { input.error = "Masukkan minimal 2 karakter"; return }
-        val filters = selectedFilters()
-        store.addHistory(query); refreshHistoryAdapter()
-        progress.visibility = View.VISIBLE; status.text = "Mencari anime…"; searchButton.isEnabled = false
-        executor.execute {
-            runCatching { repository.search(query, filters) }
-                .onSuccess { results -> runOnUiThread {
-                    adapter.submit(results, store.bookmarks().map { it.malId }.toSet())
-                    status.text = if (results.isEmpty()) "Tidak ada hasil." else "${results.size} hasil • tap anime untuk cari Sub Indo"
-                    progress.visibility = View.GONE; searchButton.isEnabled = true
-                }}
-                .onFailure { error -> runOnUiThread {
-                    status.text = "Pencarian gagal: ${error.message ?: "koneksi bermasalah"}"
-                    progress.visibility = View.GONE; searchButton.isEnabled = true
-                }}
+        if (query.length < 2) {
+            input.error = "Masukkan minimal 2 karakter"
+            return
         }
+
+        store.addHistory(query)
+        refreshHistoryAdapter()
+        status.text = "Pilih sumber untuk mencari “$query”"
+        showDirectSources(query)
     }
 
-    private fun showBookmarks() {
-        val items = store.bookmarks()
-        if (items.isEmpty()) { Toast.makeText(this, "Belum ada anime favorit", Toast.LENGTH_SHORT).show(); return }
-        adapter.submit(items, items.map { it.malId }.toSet())
-        status.text = "Favorit • ${items.size} anime"
-    }
-
-    private fun showSources(anime: Anime) {
-        val sources = SourceProvider.legalSearches(anime.displayTitle)
+    private fun showDirectSources(query: String) {
+        val sources = SourceProvider.directSearches(query)
         AlertDialog.Builder(this)
-            .setTitle(anime.displayTitle)
+            .setTitle("Cari: $query")
             .setItems(sources.map { "${it.name}\n${it.note}" }.toTypedArray()) { _, which ->
-                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(sources[which].url)))
+                val source = sources[which]
+                runCatching {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(source.url)))
+                }.onFailure {
+                    Toast.makeText(this, "Tidak bisa membuka ${source.name}", Toast.LENGTH_SHORT).show()
+                }
             }
             .setNegativeButton("Tutup", null)
             .show()
     }
 
-    override fun onDestroy() { executor.shutdownNow(); super.onDestroy() }
+    private fun showBookmarks() {
+        val items = store.bookmarks()
+        if (items.isEmpty()) {
+            Toast.makeText(this, "Belum ada anime favorit", Toast.LENGTH_SHORT).show()
+            return
+        }
+        adapter.submit(items, items.map { it.malId }.toSet())
+        status.text = "Favorit • ${items.size} anime"
+    }
+
+    private fun showSources(anime: Anime) {
+        showDirectSources(anime.displayTitle)
+    }
 }
